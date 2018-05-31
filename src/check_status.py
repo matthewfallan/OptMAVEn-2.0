@@ -1,3 +1,12 @@
+""" Print the current status of each experiment on the screen.
+
+usage:
+python check_status [prefix]
+
+If prefix is given, then only experiments that begin with the prefix will be listed.
+"""
+
+
 import cPickle as pkl
 import os
 import sys

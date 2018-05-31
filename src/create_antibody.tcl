@@ -54,13 +54,6 @@ for {set i 3} {$i < 6} {incr i} {
 set merged [::TopoTools::mergemols [range 0 $numParts 1]]
 set mergedID $numParts
 
-#FIXME
-# Renumber the residues from 1 for the heavy and light chains.
-#set mergedHeavy [atomselect $mergedID "chain $heavyChain"]
-#set mergedLight [atomselect $mergedID "chain $lightChain"]
-#restartResidues $mergedHeavy
-#restartResidues $mergedLight
-
 # Write a coordinate file of the merged parts.
 animate write pdb $outCoords $mergedID
 

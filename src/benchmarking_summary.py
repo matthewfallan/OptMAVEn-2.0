@@ -1,3 +1,18 @@
+""" Create a summary of the benchmarking results of an experiment.
+
+usage:
+python benchmarking_summary.py name_of_summary_report.csv
+
+The file name_of_summary_report.csv will be created.
+It will have the fields given in FIELDS.
+Experiment: experiment name
+Real, User, System: sums of the real, user, and system times
+Drive Usage: maximum drive usage measured
+Chains, Residues, Atoms: the numbers of chains, residues, and atoms in the antigen
+Positions, Selected Designs: the number of non-clashing positions, and the number of designs output at the end (Positions >= Selected Designs)
+Min Unrelaxed Energy, Min Relaxed Energy: the antibody-antigen interaction energies (kcal/mol) of the antibody-antigen complex before and after relaxation
+"""
+
 import csv
 import os
 import sys
@@ -10,6 +25,7 @@ import standards
 
 KEY_TOTAL = "Total"
 KEY_TYPE = "Type"
+# The fields 
 FIELDS = ["Experiment", "Real", "User", "System", "Drive Usage", "Chains", "Residues", "Atoms", "Positions", "Selected Designs", "Min Unrelaxed Energy", "Min Relaxed Energy"]
 
 # Get the name of the output file.

@@ -16,7 +16,13 @@ class CharmmProc(object):
     """ This class is the base class for managing all CHARMM procedures. """
     def __init__(self, experiment, molecule_list):
         self.experiment = experiment
+        # One or multiple molecules can be involved in the CHARMM calculation.
         self.molecules = molecule_list
+        # The residues of the molecules will be renumbered (starting at 1) before running CHARMM, or else CHARMM will crash.
+        # We want to preserve the original residue numbering so that we can keep track of e.g. which residues are part of the specified epitope.
+        # Thus, store all of the original residue numbers in the resnums OrderedDict.
+        # resnums will be used to restore the original residue numbering after the CHARMM procedure.
+        # NOTE: currently, this procedure is not equipped to handle residues with letters in their numbers, e.g. '101B'.
         self.resnums = OrderedDict()
         for molecule in self.molecules:
             molecule_resnums = OrderedDict()
@@ -26,6 +32,7 @@ class CharmmProc(object):
                     model_resnums[chain.get_id()] = [residue.get_id()[1] for residue in chain]
                 molecule_resnums[model.get_id()] = model_resnums
             self.resnums.update(molecule_resnums)
+        # Indicate that the CHARMM script has not yet run.
         self.has_run = False
 
     def begin_script(self):
@@ -57,15 +64,18 @@ class CharmmProc(object):
         """ Create text to load Molecules in a CHARMM script. """
         # Merge all of the molecules.
         merged_structure = molecules.merge(self.molecules)
-        # Convert the molecule to CHARMM format.
+        # Save the merged structure in charmm_format_file.
         charmm_format_name = "charmm_format"
         handle, charmm_format_file = tempfile.mkstemp(suffix=".pdb", dir=self.directory)
         merged_molecule = molecules.Molecule(charmm_format_name, charmm_format_file, self.experiment)
+        # CHARMM needs all of the molecules to be in separate PDB files, so disassemble the merged molecule into separate files.
 	chains, files = merged_molecule.disassemble_for_CHARMM(structure=merged_structure, directory=self.directory)
+        # Remove the file of the merged structure, which is no longer needed.
         try:
             os.remove(charmm_format_file)
         except OSError:
             pass
+        # Write the part of the script that loads the chains.
         self.chain_ids = list()
         for chain, _file in zip(chains, files):
             _id = chain.get_id()
@@ -80,9 +90,11 @@ class CharmmProc(object):
                 "open read unit 10 form name {}".format(base_name),
                 "read coor pdb unit 10",
                 "close unit 10"])
+        # Add any missing atoms to the chain.
         self.lines.extend(ic_fill())
 
     def calculate_energy(self, solvation=True):
+        """ Create text to calculate the energy in a CHARMM script. """
         self.energy_file = os.path.join(self.directory, "energy.dat")
         self.lines.extend(["! Calculate the energy.",
             energy_line(self.experiment, solvation),
@@ -94,6 +106,7 @@ class CharmmProc(object):
             "close unit 10"])
 
     def relax(self, solvation):
+        """ Create text to perform a structural relaxation in a CHARMM script. """
         self.lines.extend(["! Carry out an energy minimization",
             "nbon nbxm 5",
             energy_line(self.experiment, solvation),
@@ -101,7 +114,9 @@ class CharmmProc(object):
             "tolgrd 0.01 tolenr 0.0001 tolstp 0.00"])
 
     def output_molecules(self):
+        """ Create text to output the molecules in a CHARMM script. """
         self.output_molecule_files = list()
+        # NOTE: this function must be called AFTER self.load_molecules because self.load_molecules defines self.chain_ids.
         for _id in self.chain_ids:
             base_name = make_pdb_name(_id, "out")
             self.output_molecule_files.append(os.path.join(self.directory, base_name))
@@ -111,37 +126,50 @@ class CharmmProc(object):
                 "close unit 10"])
 
     def end_script(self):
+        """ Write a STOP indicator at the end of a CHARMM script. """
         self.lines.append("STOP")
 
     def charmm(self):
+        """ Run CHARMM using the script. """
+        # Write the input script.
         self.script_file = os.path.join(self.directory, "charmm_input.txt")
         with open(self.script_file, "w") as f:
             f.write("\n".join(self.lines))
+        # Create the output file.
         self.output_file = os.path.join(self.directory, "charmm_output.txt")
+        # Simultaneously open the input and output scripts, and call CHARMM with subprocess.Popen.
         with open(self.script_file) as fi, open(self.output_file, "w") as fo:
+            # This command securely directs the contents of the input script into CHARMM and directs the CHARMM output into the output file.
             proc = subprocess.Popen(standards.CharmmCommand, stdin=fi, stdout=fo)
+            # Wait for CHARMM to finish.
             proc.wait()
+        # Indicate that CHARMM has run.
         self.has_run = True
 
     def collect_garbage(self):
+        """ Remove the directory associated with this CHARMM process. """
         self.experiment.safe_rmtree(self.directory)
 
     def __enter__(self):
+        """ Automatically create a directory in which all of the actions of this process will occur. """
         self.directory = tempfile.mkdtemp(prefix="charmm_", dir=self.experiment.get_temp())
         self.previous_directory = os.getcwd()
         os.chdir(self.directory)
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """ Automatically delete the directory in which all of the actions of this process occured. """
         os.chdir(self.previous_directory)
         self.collect_garbage()
 
 
 class Energy(CharmmProc):
+    """ A CHARMM process that calculates the energy of molecules. """
     def __init__(self, experiment, molecule_list, solvation=True):
         CharmmProc.__init__(self, experiment, molecule_list)
         self.solvation = solvation
 
     def __enter__(self):
+        # Specify the list of events that need to happen to calculate the energy.
         CharmmProc.__enter__(self)
         self.begin_script()
         self.load_input_files()
@@ -158,8 +186,10 @@ class Energy(CharmmProc):
 
 
 class InteractionEnergy(CharmmProc):
+    """ A CHARMM process that calculates the interaction energy between two molecules. """
     def __init__(self, experiment, molecule_list, solvation=True):
         CharmmProc.__init__(self, experiment, molecule_list)
+        # Make sure exactly two molecules have been specified.
         if len(self.molecules) == 2:
             self.mol1, self.mol2 = self.molecules
         else:
@@ -167,6 +197,9 @@ class InteractionEnergy(CharmmProc):
         self.solvation = solvation
 
     def __enter__(self):
+        # Interaction energy is calculated as the energy of the complex minus the energy of the components.
+        # This isn't as efficient as it could be (i.e. using INTE) because all internal energies are computed, too.
+        # However, this formulation allows calculation of solvation energy contribution to the interaction energy, which (to my knowledge) cannot be done using INTE.
         CharmmProc.__enter__(self)
         with Energy(self.experiment, [self.mol1], solvation=self.solvation) as e1:
             self.energy1 = e1.energy
@@ -179,11 +212,13 @@ class InteractionEnergy(CharmmProc):
 
 
 class Relaxation(CharmmProc):
+    """ A CHARMM process that performs a structural relaxation. """
     def __init__(self, experiment, molecules, relaxed_file):
         CharmmProc.__init__(self, experiment, molecules)
         self.relaxed_file = relaxed_file
 
     def __enter__(self):
+        # The events that need to happen during the relaxation.
         CharmmProc.__enter__(self)
         self.begin_script()
         self.load_input_files()
@@ -198,9 +233,7 @@ class Relaxation(CharmmProc):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        #output_molecules = [molecules.Molecule(_id, _file, self.experiment) for _id, _file in zip(self.chain_ids, self.output_molecule_files)]
         relaxed_name = "relaxed"
-        #output_molecule = molecules.merge(output_molecules, True, merged_name, self.relaxed_file, write_pdb=True)
         relaxed_molecule = molecules.Molecule(relaxed_name, self.relaxed_file, self.experiment)
         relaxed_molecule.assemble_from_CHARMM(self.chain_ids, self.output_molecule_files, self.resnums)
         CharmmProc.__exit__(self, exc_type, exc_value, traceback)
@@ -245,10 +278,13 @@ def energy_line(experiment, solvation=True):
 
 
 def make_segment_name(_id):
+    """ Make a segment name from a chain ID. Simply make the ID lowercase and prepend 'ml' (for 'molecule'). """
     return "ml{}".format(_id).lower()
 
 
 def make_pdb_name(_id, io):
+    """ Make a name for a temporary PDB file either read 'in' or put 'out' from CHARMM. """
     if io not in ["in", "out"]:
         raise ValueError("The IO parameter must be 'in' or 'out,' not '{}.'".format(io))
+    # All of the chains need a separate PDB file, so put the chain name at the end.
     return "{}chain{}.pdb".format(io, _id).lower()

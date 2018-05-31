@@ -110,6 +110,7 @@ def get_region(item):
 
 
 def translate_chain(item, new_chain, check_new_part=True):
+    """ Convert the chain of one MAPs part into another chain. """
     if new_chain not in chains:
         raise ValueError("Bad chain: {}".format(new_chain))
     try:
@@ -124,6 +125,7 @@ def translate_chain(item, new_chain, check_new_part=True):
 
 
 def translate_chain_namesake(item):
+    """ Convert the chain of a MAPs part into its namesake value: H -> H, K -> L, L -> L. """
     chain = get_chain(item)
     if chain in standards.MapsHeavyChains:
         return translate_chain(item, standards.MapsNamesakeHeavy)
@@ -141,6 +143,7 @@ def get_cdr_names(light_chain):
 
 
 def get_integer_cuts(expanded_format=True):
+    """ Load all of the integer cuts of MAPs parts that clash. """
     cuts = list()
     with open(standards.MapsIntegerCutsFile) as f:
         for line in f:
@@ -180,8 +183,6 @@ def select_parts(energies, clash_cuts, solution_cuts):
     # Make the model and get a dictionary containing the different kinds of
     # parts
     model, parts = make_optmaven_selector(energies, clash_cuts, solution_cuts)
-    # Suppress the output that gets printed to the screen
-    #model.set_results_stream(None)
     # Solve the model
     model.solve()
     # Get the status of the solution
@@ -343,3 +344,36 @@ def make_optmaven_selector(energies, clash_cuts, solution_cuts):
 def get_coordinates(part, gap):
     # FIXME: add support for different gap penalties in the future
     return coords[gap][part]
+
+
+def MAPs_part_clashes(cut_file, clash_cutoff=1.0):
+    """ This function is only used for the pre-processing step of
+    determining which pairs of MAPs parts clash sterically and
+    developing integer cuts. """
+    parts = get_parts()
+    # Choose all combinations of categories.
+    # Do not check for clashes between parts of the same category.
+    finished = True
+    text = ""
+    for cat1, cat2 in itertools.combinations(parts, 2):
+        # Also, do not check for clashes between one kappa and one lambda part.
+        if "".join(sorted(cat1[0] + cat2[0])) != "KL":
+            result = "{}_{}_{}.txt".format(cut_file, cat1, cat2)
+            if os.path.isfile(result):
+                with open(result) as f:
+                    text += f.read().strip() + "\n"
+            else:
+                script = "{}_{}_{}.sh".format(cut_file, cat1, cat2)
+                command = "python {}/Make_Integer_Cuts.py {} {} {} {}".format(standards.MapsDirectory, cat1, cat2, result, clash_cutoff)
+                submitter.experiment_script(None, script, command, self_destruct=True)
+                finished = False
+    if finished:
+        with open(cut_file + ".txt", "w") as f:
+            f.write(text)
+        for cat1, cat2 in itertools.combinations(parts, 2):
+            if "".join(sorted(cat1[0] + cat2[0])) != "KL":
+                result = "{}_{}_{}.txt".format(cut_file, cat1, cat2)
+                try:
+                    os.remove(result)
+                except OSError:
+                    pass

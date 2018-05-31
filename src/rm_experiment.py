@@ -1,3 +1,8 @@
+""" Safely remove an experiment's directory.
+usage:
+python rm_experiment.py experiment_name
+"""
+
 import sys
 
 import standards

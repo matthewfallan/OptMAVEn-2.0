@@ -92,11 +92,11 @@ def nopca_run(data):
 
 
 def optimal_kmeans(data, threshold=standards.DefaultKmeansOptKThreshold, tolerance=standards.DefaultKmeansTolerance, max_iterations=standards.DefaultKmeansMaxIterations):
-    print("OPTIMAL KMEANS")
     data_pc = nopca_run(data)
     pc_map = {pc: datum for datum, pc in zip(data, data_pc)}  # map the PC-transformed data back to the original data objects
     k = 1 
     mses = OrderedDict()
+    # Keep incrementing k until an optimal k level is found.
     while k <= len(data_pc) and (k == 1 or min(mses.values()) / mses[1] > threshold):
         print("\nK =", k)
         print(data_pc)

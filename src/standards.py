@@ -148,15 +148,24 @@ MapsIntegerCutsFile = os.path.join(MapsDirectory, "MAPs_Integer_Cuts.txt")
 # Antibody coordinate standards.
 MapsCoordSep = "."
 MapsCoordDimension = 3
+
 def make_maps_coord(cdr, dimension):
+    """ Convert a CDR and a dimension to a string.
+    e.g. 'LV' and 2 becomes 'LV.2'
+    Each MAPs part is a 3-dimensional vector; the dimensions for e.g. LV are 'LV.1', 'LV.2', 'LV.3'
+    """
     return "{}{}{}".format(cdr, MapsCoordSep, dimension)
+
 def to_maps_coord(item):
+    """ Convert a string back into a CDR and dimension. """
     if MapsCoordSep in item:
         split = item.split(MapsCoordSep)
         if len(split) == 2:
             cdr, dimension = split
             if cdr in MapsCdrs and str(dimension) in map(str, range(MapsCoordDimension)):
                 return cdr, int(dimension)
+    raise TypeError("Cannot convert to MAPs coord: {}".format(item))
+
 AngleLabel = "Angle"
 xLabel = "x"
 yLabel = "y"
