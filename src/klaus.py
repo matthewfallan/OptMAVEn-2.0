@@ -257,3 +257,8 @@ class CreateAntibody(VmdProc):
         self.script = "create_antibody.tcl"
         self.vmd()
         return self
+
+
+def atomselect_residues(residue_ids):
+    """ Create a residue selection string in VMD atomselect syntax. """
+    return " or ".join(["(chain {} and resid {})".format(c_id, "{}{}{}".format(*r_id)) for c_id, r_ids in residue_ids.items() for r_id in r_ids])
