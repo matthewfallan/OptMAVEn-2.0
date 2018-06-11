@@ -39,6 +39,7 @@ AUTHOR    Q.WANG,H.YANG,X.LIU,L.DAI,T.MA,J.QI,G.WONG,R.PENG,S.LIU,J.LI,S.LI,
 AUTHOR   2 J.SONG,J.LIU,J.HE,H.YUAN,Y.XIONG,Y.LIAO,J.LI,J.YANG,Z.TONG,          
 AUTHOR   3 B.GRIFFIN,Y.BI,M.LIANG,X.XU,G.CHENG,P.WANG,X.QIU,G.KOBINGER,Y.SHI,   
 AUTHOR   4 J.YAN,G.F.GAO                                                        
+REVDAT   2   27-SEP-17 5GZN    1       REMARK                                   
 REVDAT   1   28-DEC-16 5GZN    0                                                
 JRNL        AUTH   Q.WANG,H.YANG,X.LIU,L.DAI,T.MA,J.QI,G.WONG,R.PENG,S.LIU,     
 JRNL        AUTH 2 J.LI,S.LI,J.SONG,J.LIU,J.HE,H.YUAN,Y.XIONG,Y.LIAO,J.LI,      
@@ -291,7 +292,7 @@ REMARK 200  WAVELENGTH OR RANGE        (A) : 0.979
 REMARK 200  MONOCHROMATOR                  : NULL                               
 REMARK 200  OPTICS                         : NULL                               
 REMARK 200                                                                      
-REMARK 200  DETECTOR TYPE                  : CMOS                               
+REMARK 200  DETECTOR TYPE                  : PIXEL                              
 REMARK 200  DETECTOR MANUFACTURER          : DECTRIS PILATUS 6M                 
 REMARK 200  INTENSITY-INTEGRATION SOFTWARE : HKL-3000                           
 REMARK 200  DATA SCALING SOFTWARE          : HKL-3000                           

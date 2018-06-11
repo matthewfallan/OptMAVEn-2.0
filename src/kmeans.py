@@ -88,11 +88,13 @@ def pca_run(data):
 
 def nopca_run(data):
     """ Do not perform PCA; nopca_run exists to minic the interface of the pca_run function. """
-    return [tuple(to_array(item)) for item in data]
+    means, stds = calculate_means_stds(data)
+    d_array = normalize(np.array([to_array(item) for item in data]), means, stds)
+    return [tuple(to_array(item)) for item in d_array]
 
 
 def optimal_kmeans(data, threshold=standards.DefaultKmeansOptKThreshold, tolerance=standards.DefaultKmeansTolerance, max_iterations=standards.DefaultKmeansMaxIterations):
-    data_pc = nopca_run(data)
+    data_pc = pca_run(data)
     pc_map = {pc: datum for datum, pc in zip(data, data_pc)}  # map the PC-transformed data back to the original data objects
     k = 1 
     mses = OrderedDict()

@@ -574,7 +574,7 @@ class OptmavenExperiment(Experiment):
             self.solvation_files = user_input.get_files("Solvation file(s): ", standards.InputsDirectory, None, None)
             self.charmm_energy_terms = user_input.select_from_list("CHARMM energy term(s): ", standards.DefaultCharmmEnergyTerms, 1, None)
             self.charmm_iterations = user_input.get_number("CHARMM iterations: ", 1, 20000, int)
-            self.walltime = user_input.get_number("Walltime (seconds): ", 1, 35999, int)
+            self.walltime = user_input.get_number("Walltime (seconds): ", 1, 86399, int)
             self.batch_size = user_input.get_number("Batch size: ", 1, None, int)
             self.number_of_designs = user_input.get_number("Number of designs output: ", 1, None, int)
         else:
@@ -621,8 +621,9 @@ class OptmavenExperiment(Experiment):
             (self.maps_energy_batch, "MAPs energy calculations"),
             (self.collect_maps_energies, "Prepare for MILP design"),
             (self.select_parts_batch, "MILP design"),
-            (self.select_antibodies, "Select designs"),
+            (self.relax_complexes_all, "Prepare to relax designs"),
             (self.relax_complexes_batch, "Relaxing designs"),
+            (self.select_antibodies, "Select designs"),
             (self.create_report, "Creating report"),
             (self.completed, "Completed")
         ][status]
@@ -645,8 +646,7 @@ class OptmavenExperiment(Experiment):
             (standards.yLabel, ", ".join(map(str, self.grid_y))),
             (standards.zLabel, ", ".join(map(str, self.grid_z))),
             ("Clash cutoff", self.clash_cutoff),
-            ("Total positions", len(self.positions)),
-            ("Selected designs", self.select_number)
+            ("Total positions", len(self.positions))
         ]
         # Write the summary.
         self.summary_report = os.path.join(self.directory, "Summary.txt")
@@ -657,10 +657,7 @@ class OptmavenExperiment(Experiment):
         # Define a list of fields of results to report.
         result_report_fields = list()
         # Loop through all of the results (i.e. designs of antibodies).
-        for index in range(self.select_number):
-            # The results are stored as pickled OptmavenResult objects. Load them.
-            with open(self.results_pickle_file(index)) as f:
-                result = pkl.load(f)
+        for result in self.ranked_results:
             # Copy the information from the OptmavenResult into the result_info list.
             result_info = result.output()
             result_report_info.append(result_info)
@@ -927,71 +924,60 @@ class OptmavenExperiment(Experiment):
 
     def select_antibodies(self, args):
         """ Cluster the antibodies based on their coordinates. """
-        # Make a dict to store the designs.
-        antibodies = defaultdict(list)
-        # Loop through the design for each position.
-        for design in map(self.get_select_parts_file_finished, self.positions):
-            with open(design) as f:
-                # Load the design, which is saved as a pickled ProtoAntibody object.
-                antibody = pkl.load(f)
-            # Bin the antibodies into the list for either kappa or lambda chain antibodies.
-            # The kappa and lambda chain antibodies are clustered separately.
-            antibodies[antibody.light_chain].append(antibody)
-        clusters = dict()
+        # Collect all of the relaxed complexes.
+        relaxed_complexes = defaultdict(list)
+        results = dict()
+        for index in range(len(self.positions)):
+            # Open the pickle file in which the relaxed complex is stored as an OptmavenResult.
+            with open(self.results_pickle_file(index)) as f:
+                # Load the result.
+                result = pkl.load(f)
+                # Get the proto-antibody from the result.
+                pab = result.proto_antibody
+                # Change the energy from the unrelaxed energy to the relaxed energy.
+                pab.energy = result.relaxed_energy
+                # Put the proto-antibody object into the bin corresponding to its light chain.
+                # Lambda and kappa chain antibodies are clustered separately.
+                relaxed_complexes[pab.light_chain].append(pab)
+                # Also store the OptmavenResult object; make it accessible via the ID of its ProtoAntibody.
+                results[id(pab)] = result
+        clusters = list()
         # For each chain (kappa and lambda):
-        for chain, chain_abs in antibodies.iteritems():
+        for chain, chain_abs in relaxed_complexes.iteritems():
             # Cluster the antibodies in the chain (listed in chain_abs).
             chain_clusters, mses = kmeans.optimal_kmeans(chain_abs)
             # Sort the designs in each cluster in order of increasing interaction energy.
             chain_clusters = [sorted(cluster) for cluster in chain_clusters]
-            # Assign to each cluster an index, based on the minimum interaction energy of the cluster.
-            clusters[chain] = dict(enumerate(sorted(chain_clusters)))
+            clusters.extend(chain_clusters)
             # Write a file of the mse for each k during clustering.
             with open(os.path.join(self.get_temp(), "clustering_{}.csv".format(chain)), "w") as f:
                 f.write("\n".join(["k,mse"] + ["{},{}".format(k, mse) for k, mse in mses.items()]))
+        # Assign to each cluster an index based on the minimum interaction energy of the cluster.
+        clusters = {i + 1: cluster for i, cluster in enumerate(sorted(clusters))}
         # Select the best antibodies from the clusters.
-        self.highest_ranked_designs = list()
-        # If there are more designs than the user wants, select the number that the user wants.
-        # Otherwise, select all designs.
-        self.select_number = min(self.number_of_designs, len(self.positions))
-        while len(self.highest_ranked_designs) < self.select_number:
+        ranked_protoantibodies = list()
+        while len(ranked_protoantibodies) < len(self.positions):
             # Collect in cluster_heads the best as-yet unselected design from each cluster that has at least one unselected design.
             cluster_heads = list()
-            # Select separately from kappa and lambda clusters.
-            for chain, chain_clusters in clusters.iteritems():
-                # Loop through all the clusters for the light chain type, from the cluster with the lowest minimum interaction energy to that with the highest minimum interaction energy.
-                for index in sorted(chain_clusters, key=lambda x: chain_clusters[x]):
-                    cluster = chain_clusters[index]
-                    if len(cluster) > 0:
-                        # If a cluster has an unselected design, put the best design from the cluster in the 
-                        antibody = cluster.pop(0)
-                        antibody.set_cluster(index)
-                        cluster_heads.append(antibody)
+            # Loop through all the clusters for the light chain type, from the cluster with the lowest minimum interaction energy to that with the highest minimum interaction energy.
+            for index in sorted(range(1, len(clusters) + 1), key=lambda x: clusters[x]):
+                cluster = clusters[index]
+                if len(cluster) > 0:
+                    # If a cluster has an unselected design, put the best design from the cluster in the 
+                    antibody = cluster.pop(0)
+                    antibody.set_cluster(index)
+                    cluster_heads.append(antibody)
             # Add these designs to the list of best designs.
-            while len(self.highest_ranked_designs) < self.select_number and len(cluster_heads) > 0:
-                self.highest_ranked_designs.append(cluster_heads.pop(0))
-        # Make a directory in which to store the unrelaxed antibody-antigen complexes for the best designs..
-        self.unrelaxed_complex_directory = os.path.join(self.get_temp(), "unrelaxed_complexes")
-        try:
-            os.mkdir(self.unrelaxed_complex_directory)
-        except OSError:
-            pass
-        # Define the names of the files of the unrelaxed complexes.
-        self.unrelaxed_complex_files = [os.path.join(self.unrelaxed_complex_directory, "complex_{}.pdb".format(i)) for i in range(self.select_number)]
-        # Create molecule objects for the unrelaxed complexes.
-        [ab.to_molecule("unrelaxed", _file, self) for ab, _file in zip(self.highest_ranked_designs, self.unrelaxed_complex_files)]
-        if self.benchmarking:
-            # Record the drive usage after creating the molecules.
-            self.add_drive_usage()
-        # Remove the select parts directory; it is no longer needed.
-        self.safe_rmtree(self.select_parts_directory)
-        if self.benchmarking:
-            # Record the drive usage after removing all of the pickled MAPs energies and unselected designs.
-            self.add_drive_usage()
-        # Change the status to 'Relaxing designs'
-        self.change_status()
-        # Relax all of the complexes.
-        self.relax_complexes_all()
+            while len(ranked_protoantibodies) < len(self.positions) and len(cluster_heads) > 0:
+                ranked_protoantibodies.append(cluster_heads.pop(0))
+        # Make a list of the best designs, each represented by an OptmavenResult object.
+        self.ranked_results = [results[id(design)] for design in ranked_protoantibodies]
+        # Assign a rank to each result.
+        for rank in range(len(self.ranked_results)):
+            self.ranked_results[rank].rank = rank + 1
+        # Create the report.
+        self.run_next()
+
 
     def relaxed_complex_directory(self):
         return os.path.join(self.directory, "antigen-antibody-complexes")
@@ -1011,8 +997,37 @@ class OptmavenExperiment(Experiment):
     def results_pickle_file(self, index):
         return os.path.join(self.results_pickle_directory(), "result_{}.pickle".format(index))
 
-    def relax_complexes_all(self):
-        """ Relax all of the antigen-antibody complexes of the best designs. """
+    def relax_complexes_all(self, args=None):
+        """ Relax all of the antigen-antibody complexes. """
+        self.designs = list()
+        # Loop through the design for each position.
+        for design in map(self.get_select_parts_file_finished, self.positions):
+            with open(design) as f:
+                # Load the design, which is saved as a pickled ProtoAntibody object.
+                antibody = pkl.load(f)
+            # Bin the antibodies into the list for either kappa or lambda chain antibodies.
+            # The kappa and lambda chain antibodies are clustered separately.
+            self.designs.append(antibody)
+        # Make a directory in which to store the unrelaxed antibody-antigen complexes for all designs.
+        self.unrelaxed_complex_directory = os.path.join(self.get_temp(), "unrelaxed_complexes")
+        try:
+            os.mkdir(self.unrelaxed_complex_directory)
+        except OSError:
+            pass
+        # Define the names of the files of the unrelaxed complexes.
+        self.unrelaxed_complex_files = [os.path.join(self.unrelaxed_complex_directory, "complex_{}.pdb".format(i)) for i, design in enumerate(self.designs)]
+        # Create molecule objects for the unrelaxed complexes.
+        [design.to_molecule("unrelaxed", _file, self) for _file, design in zip(self.unrelaxed_complex_files, self.designs)]
+        if self.benchmarking:
+            # Record the drive usage after creating the molecules.
+            self.add_drive_usage()
+        # Remove the select parts directory; it is no longer needed.
+        self.safe_rmtree(self.select_parts_directory)
+        if self.benchmarking:
+            # Record the drive usage after removing all of the pickled MAPs energies and unselected designs.
+            self.add_drive_usage()
+        # Change the status to 'Relaxing designs'
+        self.change_status()
         # Make a directory into which the relaxed structure files will go.
         try:
             os.mkdir(self.relaxed_complex_directory())
@@ -1024,7 +1039,7 @@ class OptmavenExperiment(Experiment):
         except OSError:
             pass
         # Create a job for each design to be relaxed.
-        jobs = {index: self.results_pickle_file(index) for index in range(self.select_number)}
+        jobs = {index: self.results_pickle_file(index) for index in range(len(self.positions))}
         # Save the experiment.
         self.save()
         # Submit the jobs.
@@ -1043,7 +1058,7 @@ class OptmavenExperiment(Experiment):
     def relax_complex_single(self, index):
         """ Relax a single antigen-antibody complex. """
         garbage = list()
-        _complex = molecules.AntibodyAntigenComplex("relaxed", self.unrelaxed_complex_files[index], self)
+        _complex = molecules.AntibodyAntigenComplex("relaxed", self.unrelaxed_complex_files[index - 1], self)
         # Calculate interaction energy before relaxation.
         antigen, antibody = _complex.disassemble_into_chains([_complex.antigen_chains, _complex.antibody_chains])
         garbage.extend([antigen.file, antibody.file])
@@ -1061,8 +1076,7 @@ class OptmavenExperiment(Experiment):
             if self.benchmarking:
                 self.add_drive_usage()
         # Create an OptmavenResult to store information about the relaxation (e.g. energy before and after relaxation).
-        # This information will ultimately go into Results.csv.
-        result = OptmavenResult(self.result_name(index), self.results_directory(index), _complex, self.highest_ranked_designs[index], unrelaxed_energy, relaxed_energy) 
+        result = OptmavenResult(self.result_name(index), self.results_directory(index), _complex, self.designs[index - 1], unrelaxed_energy, relaxed_energy) 
         with open(self.results_pickle_file(index), "w") as f:
             pkl.dump(result, f)
         
@@ -1110,8 +1124,10 @@ class OptmavenResult(object):
         self.directory = directory  # directory in which the design is located
         self.molecule = molecule  # molecule object for the design
         self.proto_antibody = proto_antibody  # proto-antibody object for the design
+        self.milp_energy = proto_antibody.energy  # MILP interaction energy
         self.unrelaxed_energy = unrelaxed_energy  # interaction energy of the complex before relaxation
         self.relaxed_energy = relaxed_energy  # interaction energy of the complex after relaxation
+        self.rank = -1
 
     def output(self):
         """ Output the information as a dict whose keys match the fields of Results.csv. """
@@ -1121,6 +1137,7 @@ class OptmavenResult(object):
             pass
         info = OrderedDict()
         info["Result"] = self.name
+        info["Rank"] = self.rank
         # Write the molecule.
         self.molecule_file = os.path.join(self.directory, "{}.pdb".format(self.name))
         shutil.copyfile(self.molecule.file, self.molecule_file)
@@ -1138,11 +1155,35 @@ class OptmavenResult(object):
         for dimension, coord in self.proto_antibody.get_labeled_position().items():
             info[dimension] = coord
         info["Cluster"] = self.proto_antibody.cluster
-        info["MILP energy (kcal/mol)"] = self.proto_antibody.energy
+        info["MILP energy (kcal/mol)"] = self.milp_energy
         info["Unrelaxed energy (kcal/mol)"] = self.unrelaxed_energy
         info["Relaxed energy (kcal/mol)"] = self.relaxed_energy
         return info
 
+    def __eq__(self, other):
+        if isinstance(other, OptmavenResult):
+            return self.rank == other.rank
+
+    def __ne__(self, other):
+        if isinstance(other, OptmavenResult):
+            return self.rank != other.rank
+
+    def __le__(self, other):
+        if isinstance(other, OptmavenResult):
+            return self.rank <= other.rank
+
+    def __lt__(self, other):
+        if isinstance(other, OptmavenResult):
+            return self.rank < other.rank
+
+    def __ge__(self, other):
+        if isinstance(other, OptmavenResult):
+            return self.rank >= other.rank
+
+    def __gt__(self, other):
+        if isinstance(other, OptmavenResult):
+            return self.rank > other.rank
+        
 
 class CreateAntigenAntibodyComplexExperiment(OptmavenExperiment):
     """ This Experiment creates an antigen-antibody complex without relaxing the structure. """

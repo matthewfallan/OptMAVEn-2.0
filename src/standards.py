@@ -42,8 +42,6 @@ contents = {
     "programs": ["Optmaven.py"]
 }
 
-# FIXME: implement file checking
-
 
 if not os.path.isdir(ExperimentsDirectory):
     os.mkdir(ExperimentsDirectory)
@@ -63,7 +61,6 @@ DatetimeFormat = "%Y %b %d %H:%M:%S"
 AllowedPathCharacters = string.letters + string.digits + "_."
 
 # Experimental configuration.
-# FIXME
 DefaultNumberOfDesigns = 5000
 
 # Argument standards.
@@ -94,12 +91,11 @@ DefaultOptmavenGrid_x = np.linspace(-10, 5, 7)
 DefaultOptmavenGrid_y = np.linspace(-5, 10, 7)
 DefaultOptmavenGrid_z = np.linspace(3.75, 16.25, 11)
 DefaultOptmavenGrid_zAngle = np.linspace(0, 300, 6)
-
 """
-DefaultOptmavenGrid_x = np.linspace(-5, 10, 13)
-DefaultOptmavenGrid_y = np.linspace(-10, 5, 13)
-DefaultOptmavenGrid_z = np.linspace(3.75, 16.25, 21)
-DefaultOptmavenGrid_zAngle = np.linspace(0, 300, 6)
+DefaultOptmavenGrid_x = np.linspace(0, 5, 2)
+DefaultOptmavenGrid_y = np.linspace(0, 5, 2)
+DefaultOptmavenGrid_z = np.linspace(10, 15, 2)
+DefaultOptmavenGrid_zAngle = np.linspace(0, 180, 2)
 """
 
 # Input files.
