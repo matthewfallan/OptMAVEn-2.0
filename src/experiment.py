@@ -67,6 +67,8 @@ class Experiment(object):
             os.mkdir(self.benchmark_directory)
             # Record the drive usage at the very beginning.
             self.add_drive_usage()
+        # Gap penalty for getting MAPs coordinates.
+        self.gap_penalty = user_input.select_one_from_list("Gap penalty: ", standards.MapsGaps)
 
     def save(self):
         """ Save the current state of the Experiment to the pickle file. """
@@ -267,6 +269,7 @@ class InteractionExperiment(Experiment):
         self.solvation_files = [standards.DefaultSolvationFile]
         self.charmm_energy_terms = standards.DefaultCharmmEnergyTerms
         self.charmm_iterations = standards.DefaultCharmmIterations
+        self.charmm_iterations = user_input.get_number("CHARMM iterations: ", min_value=1, value_type=int)
         self.walltime = standards.DefaultWalltime
         # Specify the file from which to obtain the interacting molecules.
         self.molecule = self.get_molecule("input", "Please enter the name of the molecule for {}: ".format(self.name))
@@ -276,48 +279,64 @@ class InteractionExperiment(Experiment):
         chains_left = list(self.chain_ids)
         self.chain_groups = list()
         for i in [1, 2]:
+            print("LEFT:", chains_left)
             group = user_input.select_from_list("Please select the chain(s) for group {}: ".format(i), chains_left, min_number=1, max_number=(len(chains_left) + i - 2))
+            print("GROUP:", group)
             for chain_id in group:
                 chains_left.pop(chains_left.index(chain_id))
             self.chain_groups.append(group)
-        # Initialize the status to 0 and submit the first script to the queue.
-        self.status = 0
-        self.save_and_submit()
+        # FIXME
+        print("CHAIN GROUPS:",self.chain_groups)
+        # Should the structure be relaxed first?
+        self.do_relaxation = user_input.get_yn("Relax structure? ")
+        # Should the relaxation initially ignore solvation?
+        self.ignore_solvation_initially = (standards.CharmmSolvationTerm not in self.charmm_energy_terms) or user_input.get_yn("Ignore solvation in unrelaxed structure? ")
+        self.energies = OrderedDict()
+        self.energy_fields = ["Condition", "Complex", "Group 1", "Group 2", "Interaction"]
+        if self.do_relaxation:
+            if user_input.get_yn("Queue? "):
+                # Initialize the status to 0 and submit the first script to the queue.
+                self.status = 0
+                self.save_and_submit()
+            else:
+                self.relaxation(None)
+        else:
+            # Compute the interaction energy interactively if no relaxation is to be performed.
+            self.interaction_energy("unrelaxed")
+            for row in self.energies.values():
+                print("\n".join(["{}: {}".format(field, row[field]) for field in self.energy_fields]))
+                print()
+            self.create_report()
+            self.safe_rmtree(self.get_temp())
 
     def get_task(self, status):
         """ Return the task (a function) and the purpose of the task (a string). There is just one task for an InteractionExperiment. """
         return [(self.relaxation, "Relaxation")][status]
-
+    
+    def interaction_energy(self, energy_type):
+        """ Compute the interaction energy. """
+        solvation = energy_type == "relaxed" or not self.ignore_solvation_initially
+        group1, group2 = self.molecule.disassemble_into_chains(self.chain_groups)
+        with charmm.InteractionEnergy(self, [group1, group2], solvation=solvation) as e:
+            # Store the energy of the molecules separately and in complex.
+            self.energies[energy_type] = {"Condition": energy_type.capitalize()}
+            self.energies[energy_type]["Group 1"] = e.energy1
+            self.energies[energy_type]["Group 2"] = e.energy2
+            self.energies[energy_type]["Complex"] = e.energy12
+            self.energies[energy_type]["Interaction"] = e.energy
+            if self.benchmarking:
+                self.add_drive_usage()
+        
     def relaxation(self, args):
         """ Relax the structure of the molecules before performing the interaction energy calculation. """
-        self.energy_fields = ["Condition", "Complex", "Group 1", "Group 2", "Interaction"]
         garbage = list()
         # Calculate interaction energy before relaxation.
-        group1, group2 = self.molecule.disassemble_into_chains(self.chain_groups)
-        with charmm.InteractionEnergy(self, [group1, group2], solvation=False) as e:
-            # Store the energy of the molecules separately and in complex.
-            self.energies_unrelaxed = {"Condition": "Unrelaxed"}
-            self.energies_unrelaxed["Group 1"] = e.energy1
-            self.energies_unrelaxed["Group 2"] = e.energy2
-            self.energies_unrelaxed["Complex"] = e.energy12
-            self.energies_unrelaxed["Interaction"] = e.energy
-            if self.benchmarking:
-                self.add_drive_usage()
+        self.interaction_energy("unrelaxed")
         # Relax the complex.
         self.relaxed_file = os.path.join(self.structure_directory, "relaxed.pdb")
-        self.molecule.relax(relaxed_file=self.relaxed_file, in_place=True)
+        self.molecule.relax(relaxed_file=self.relaxed_file, in_place=True, ignore_solvation_initially=self.ignore_solvation_initially)
         # Calculate interaction energy after relaxation.
-        group1, group2 = self.molecule.disassemble_into_chains(self.chain_groups)
-        garbage.extend([group1.file, group2.file])
-        with charmm.InteractionEnergy(self, [group1, group2], solvation=True) as e:
-            # Store the energy of the molecules separately and in complex.
-            self.energies_relaxed = {"Condition": "Relaxed"}
-            self.energies_relaxed["Group 1"] = e.energy1
-            self.energies_relaxed["Group 2"] = e.energy2
-            self.energies_relaxed["Complex"] = e.energy12
-            self.energies_relaxed["Interaction"] = e.energy
-            if self.benchmarking:
-                self.add_drive_usage()
+        self.interaction_energy("relaxed")
         # Remove all temporary files.
         for fn in garbage:
             try:
@@ -344,8 +363,8 @@ class InteractionExperiment(Experiment):
         with open(self.results_file, "w") as f:
             writer = csv.DictWriter(f, self.energy_fields)
             writer.writeheader()
-            writer.writerow(self.energies_unrelaxed)
-            writer.writerow(self.energies_relaxed)
+            for row in self.energies.values():
+                writer.writerow(row)
 
 
 class AntibodyInteractionExperiment(InteractionExperiment):
@@ -368,6 +387,7 @@ class AntibodyInteractionExperiment(InteractionExperiment):
         self.select_epitope_residues(antigen_chains_selected)
         # Create the antigen-antibody complex.
         self.antigen_position = [self.ask(pos, number=True) for pos in standards.PositionOrder]
+        self.energies = OrderedDict()
         do = True
         while do:
             try:
@@ -404,12 +424,12 @@ class AntibodyInteractionExperiment(InteractionExperiment):
         with open(self.results_file, "w") as f:
             writer = csv.DictWriter(f, self.energy_fields)
             writer.writeheader()
-            writer.writerow(self.energies_unrelaxed)
-            writer.writerow(self.energies_relaxed)
+            for row in self.energies.values():
+                writer.writerow(row)
 
     def get_proto_antibody(self):
         """ Construct a ProtoAntibody object from the specified MAPs parts and the antigen position. """
-        return molecules.ProtoAntibody(self.maps_parts, self.antigen_position, energy=None)
+        return molecules.ProtoAntibody(self.maps_parts, self.antigen_position, energy=None, gap_penalty=self.gap_penalty)
 
     def get_task(self, status):
         """ Return the task (a function) and the purpose (a str) of the experiment. """
@@ -915,7 +935,7 @@ class OptmavenExperiment(Experiment):
         # The solution is a dictionary and the key and values are partname and number respectively
         # The energy is the total interaction energy between the selected parts and antigen
         solution, energy = maps.select_parts(position_energies, clash_cuts, solution_cuts)
-        antibody = molecules.ProtoAntibody(solution, position, energy)
+        antibody = molecules.ProtoAntibody(solution, position, energy, self.gap_penalty)
         with open(self.get_select_parts_file_finished(index), "w") as f:
             pkl.dump(antibody, f)
         if self.benchmarking:
@@ -1231,7 +1251,7 @@ class CreateAntigenAntibodyComplexExperiment(OptmavenExperiment):
         # Center and point the epitope downward.
         OptmavenExperiment.minimize_epitope_z_coordinates(self, antigen_molecule, grid_search=False)
         # Assemble the complex.
-        self.proto_antibody = molecules.ProtoAntibody(parts, position, energy)
+        self.proto_antibody = molecules.ProtoAntibody(parts, position, energy, self.gap_penalty)
         self.proto_antibody.to_molecule("complex", output_file, self)
         clear()
         self.report_directory()

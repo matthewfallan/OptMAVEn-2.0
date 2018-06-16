@@ -14,12 +14,10 @@ sys.path.append(standards.CplexDirectory)
 import cplex
 
 coords_files = dict()
-gaps = [8]
-for gap in gaps:
-    coords_files[gap] = os.path.join(standards.MapsDirectory, "all_coords_{}.csv".format(
+for gap in standards.MapsGaps:
+    coords_files[gap] = os.path.join(standards.MapsDirectory, "coords_{}.csv".format(
             gap))
 
-#FIXME
 sep = "_"
 light_chains = standards.MapsLightChains
 heavy_chains = standards.MapsHeavyChains
@@ -47,7 +45,7 @@ for part in parts:
 
 
 coords = dict()
-for gap in gaps:
+for gap in standards.MapsGaps:
     coords[gap] = {line.split(",")[0]: np.array(map(float, line.split(",")[1:]))
             for line in open(coords_files[gap])}
 
@@ -342,7 +340,6 @@ def make_optmaven_selector(energies, clash_cuts, solution_cuts):
 
 
 def get_coordinates(part, gap):
-    # FIXME: add support for different gap penalties in the future
     return coords[gap][part]
 
 

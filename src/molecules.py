@@ -130,11 +130,11 @@ class Molecule(object):
         """ Perform renumbering and then write a PDB. """
         self.write_pdb(self.get_renumbered_structure(first_residue), file_name, selector)
         
-    def relax(self, relaxed_file=None, in_place=True):
+    def relax(self, relaxed_file=None, in_place=True, ignore_solvation_initially=True):
         """ Perform a structural relaxation. """
-        self.relax_CHARMM(relaxed_file, in_place)
+        self.relax_CHARMM(relaxed_file, in_place, ignore_solvation_initially)
     
-    def relax_CHARMM(self, relaxed_file=None, in_place=True):
+    def relax_CHARMM(self, relaxed_file=None, in_place=True, ignore_solvation_initially=True):
         """ Perform a structural relaxation with CHARMM.
         relaxed_file: the name of the file in which to store the relaxed structure.
         in_place: should the original file of the molecule be overwritten with the relaxed structure?
@@ -145,7 +145,7 @@ class Molecule(object):
                 raise ValueError("A relaxation must be in place if no alternate relaxed file is given.") 
             relaxed_file = self.file
         # Perform the relaxation.
-        with charmm.Relaxation(self.experiment, [self], relaxed_file) as relax:
+        with charmm.Relaxation(self.experiment, [self], relaxed_file, ignore_solvation_initially=ignore_solvation_initially) as relax:
             pass
         # If the relaxation was in place and a relaxed file was given, change the filename of the molecule to that of the relaxed file.
         # This way, all subsequent functions of this molecule will use that relaxed structure by default.
@@ -355,11 +355,12 @@ class AntibodyAntigenComplex(Molecule):
 
 class ProtoAntibody(object):
     """ A proto-antibody stores a set of six MAPs parts and an antigen position. The select parts step creates ProtoAntibodies. """
-    def __init__(self, parts, position, energy):
+    def __init__(self, parts, position, energy, gap_penalty):
         # Initialize attributes.
         self.parts = dict()
         self.position = position  # antigen position
         self.energy = energy  # interaction energy
+        self.gap_penalty = gap_penalty
         self.light_chain = None
         self.coords = None
         self.cluster = None
@@ -453,7 +454,7 @@ class ProtoAntibody(object):
                     # Add the coordinate to the coordinate vector.
                     cdr = self.translate_cdr(cdr)
                     part = maps.join(cdr, self.parts[cdr])
-                    coords.append(maps.get_coordinates(part, standards.DefaultGapPenalty)[dim])
+                    coords.append(maps.get_coordinates(part, self.gap_penalty)[dim])
                     continue
                 # If the coordinate cannot be identified, raise a ValueError.
                 raise ValueError("Bad coordinate: {}".format(coord))

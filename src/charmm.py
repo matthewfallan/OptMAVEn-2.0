@@ -213,9 +213,10 @@ class InteractionEnergy(CharmmProc):
 
 class Relaxation(CharmmProc):
     """ A CHARMM process that performs a structural relaxation. """
-    def __init__(self, experiment, molecules, relaxed_file):
+    def __init__(self, experiment, molecules, relaxed_file, ignore_solvation_initially=True):
         CharmmProc.__init__(self, experiment, molecules)
         self.relaxed_file = relaxed_file
+        self.ignore_solvation_initially = ignore_solvation_initially
 
     def __enter__(self):
         # The events that need to happen during the relaxation.
@@ -224,7 +225,8 @@ class Relaxation(CharmmProc):
         self.load_input_files()
         self.load_molecules()
         # Relaxations with solvation can crash if there are steric clashes. Relax without solvation first to resolve any clashes, then relax again with solvation if needed.
-        self.relax(solvation=False)
+        if self.ignore_solvation_initially or standards.CharmmSolvationTerm not in self.experiment.charmm_energy_terms:
+            self.relax(solvation=False)
         if standards.CharmmSolvationTerm in self.experiment.charmm_energy_terms:
             self.relax(solvation=True)
         self.output_molecules()

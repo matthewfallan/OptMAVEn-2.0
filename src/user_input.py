@@ -174,7 +174,9 @@ def select_from_list(prompt, list_, min_number=None, max_number=None, names=None
         raise IOError("Minimum selction {} cannot be greater than maximum selection {}.".format(min_number, max_number))
     # If the minumum number equals the number of items, all items must be selected.
     if min_number == n:
-        return list_
+        disp("Automatically selecting all {n} items from length-{n} list: {l}".format(n=n, l=", ".join(names)))
+        # Return a copy of the list so that things that depend on the lists input and returned being a different objects won't fail.
+        return list(list_)
     # Initialize to no items selected.
     items = None
     # Make a statement of which options are available.
@@ -252,6 +254,6 @@ def unescape_item(item):
         return item
 
 
-def select_one_from_list(prompt, list_, names=None, fetch_pdir=None):
+def select_one_from_list(prompt, list_, names=None):
     """ Select exactly one item from a list, and return that item, not a length-one list of that item. """
-    return select_from_list(prompt, list_, 1, 1, names, fetch_pdir)[0]
+    return select_from_list(prompt, list_, 1, 1, names)[0]

@@ -106,7 +106,7 @@ DefaultSolvationFile = os.path.join(InputsDirectory, "solvation.dat")
 # CHARMM configuration.
 CharmmSolvationTerm = "gbener"
 DefaultCharmmEnergyTerms = ['angl', 'bond', 'dihe', 'elec', 'impr', 'urey', 'vdw', CharmmSolvationTerm]
-DefaultCharmmIterations = 5000
+DefaultCharmmIterations = 10000#FIXME: 5000 is default
 CharmmCommand = "/gpfs/group/cdm8/default/c34b1.xj.gnu/exec/gnu/charmm.serial.xlarge" 
 
 # VMD configuration.
@@ -131,6 +131,7 @@ ScaffoldAntibodies = {chain: os.path.join(ScaffoldsDirectory, "Molecule{}.pdb".f
 DefaultClashCutoff = 1.25  # Angstroms
 
 # MAPs database standards.
+MapsGaps = [4, 6, 8, 10, 12]
 MapsHeavyChains = ["H"]
 MapsLightChains = ["K", "L"]
 MapsNamesakeHeavy = "H"
